@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "nomatch": "unknown",
+  "type": "string",
+  "table": [
+    {
+      "index": "127.0.0.2",
+      "value": "true"
+    },
+    {
+      "index": "performance-test-host",
+      "value": "true"
+    },
+    {
+      "index": "group-one-host-two",
+      "value": "true"
+    }
+  ]
+}

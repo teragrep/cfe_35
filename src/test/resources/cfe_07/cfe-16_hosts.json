@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "nomatch": "unknown",
+  "type": "string",
+  "table": [
+    {
+      "index": "my-routingkey-having-hostname.example.com",
+      "value": "true"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "nomatch": "unknown",
+  "type": "string",
+  "table": [
+    {
+      "index": "My RoutingKey having token",
+      "value": "my-routingkey-having-hostname.example.com"
+    },
+    {
+      "index": "My RoutingKey with no hostname",
+      "value": "hostname-doesnt-exist.example.com"
+    },
+    {
+      "index": "Returns invalid hostname",
+      "value": "##?"
+    }
+  ]
+}

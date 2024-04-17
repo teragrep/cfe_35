@@ -1,0 +1,19 @@
+[Unit]
+Description=com.teragrep.cfe_35
+
+[Service]
+ExecStart=/usr/lib/jvm/jre-11/bin/java \
+    -DserverThreads=1 \
+    -DlistenPort=1601 \
+    -Dcfe07LookupPath=cfe07Lookups/ \
+    -Dcfe16LookupPath=cfe16Lookups/ \
+    -Dkin02LookupPath=kin02Lookups/ \
+    -DroutingTargetsConfig=targets.json \
+    -DprometheusPort=1234 \
+    -Dlog4j2.configurationFile=file:log4j2.xml \
+    -jar /opt/teragrep/cfe_35/lib/cfe_35.jar
+User=srv-cfe_35
+WorkingDirectory=/opt/teragrep/cfe_35/etc
+
+[Install]
+WantedBy=multi-user.target

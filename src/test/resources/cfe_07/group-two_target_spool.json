@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "nomatch": "unknown",
+  "type": "string",
+  "table": [
+    {
+      "index": "",
+      "value": "true"
+    },
+    {
+      "index": "group-two-tag-one",
+      "value": "true"
+    },
+    {
+      "index": "group-two-tag-two",
+      "value": "true"
+    },
+    {
+      "index": "common-tag",
+      "value": "true"
+    }
+  ]
+}
