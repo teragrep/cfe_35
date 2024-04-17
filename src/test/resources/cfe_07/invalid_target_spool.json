@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "nomatch": "unknown",
+  "type": "string",
+  "table": [
+    {
+      "index": "invalid-tagname",
+      "value": "true"
+    }
+  ]
+}

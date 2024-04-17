@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+	       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	       xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <packaging>rpm</packaging>
+  <modelVersion>4.0.0</modelVersion>
+  <artifactId>cfe_35</artifactId>
+  <version>${revision}${sha1}${changelist}.x86_64</version>
+  <name>cfe_35</name>
+  <description>cfe_35</description>
+  <groupId>com.teragrep</groupId>
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.source>1.8</maven.compiler.source>
+    <maven.compiler.target>1.8</maven.compiler.target>
+    <java.version>1.8</java.version>
+    <revision>0.0.1</revision>
+    <changelist>-SNAPSHOT</changelist>
+    <sha1/>
+  </properties>
+  <build>
+    <directory>${project.basedir}/target</directory>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <version>3.4.1</version>
+        <executions>
+          <execution>
+            <id>enforce</id>
+            <phase>none</phase>
+          </execution>
+          <execution>
+            <id>enforce-maven</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <requireMavenVersion>
+                  <version>3.2.5</version>
+                </requireMavenVersion>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>rpm-maven-plugin</artifactId>
+        <version>2.2.0</version>
+        <extensions>true</extensions>
+        <executions>
+          <execution>
+            <id>default-rpm</id>
+            <goals>
+              <goal>rpm</goal>
+            </goals>
+            <phase>package</phase>
+          </execution>
+        </executions>
+        <configuration>
+          <summary>${project.groupId}-${project.artifactId}</summary>
+          <name>${project.groupId}-${project.artifactId}</name>
+          <version>${project.version}</version>
+          <release>${env.BUILD_ID}</release>
+          <license>Proprietary</license>
+          <distribution>Teragrep bos_01</distribution>
+          <vendor>https://teragrep.com/</vendor>
+          <packager>Teragrep &lt;servicedesk@teragrep.com&gt;</packager>
+          <group>Teragrep/cfe_35</group>
+          <description>${project.groupId}-${project.artifactId}</description>
+          <needarch>false</needarch>
+          <defaultUsername>srv-cfe_35</defaultUsername>
+          <defaultGroupname>srv-cfe_35</defaultGroupname>
+          <defaultFilemode>0644</defaultFilemode>
+          <defaultDirmode>0755</defaultDirmode>
+          <defineStatements>
+            <defineStatement>_build_id_links none</defineStatement>
+            <defineStatement>__provides_exclude ^osgi\\(.*$</defineStatement>
+            <defineStatement>__requires_exclude ^osgi\\(.*$</defineStatement>
+          </defineStatements>
+          <mappings>
+            <mapping>
+              <directory>/usr/lib/systemd/system</directory>
+              <directoryIncluded>false</directoryIncluded>
+              <sources>
+                <source>
+                  <location>${project.basedir}/src/main/resources/cfe_35.service</location>
+                </source>
+              </sources>
+            </mapping>
+            <mapping>
+              <directory>/opt/teragrep/${project.artifactId}/etc</directory>
+              <filemode>755</filemode>
+              <dirmode>755</dirmode>
+              <username>srv-cfe_35</username>
+              <groupname>srv-cfe_35</groupname>
+              <recurseDirectories>true</recurseDirectories>
+              <sources>
+                <source>
+                  <location>${project.basedir}/src/main/resources/log4j2.xml</location>
+                  <destination>log4j2.xml</destination>
+                </source>
+              </sources>
+            </mapping>
+            <mapping>
+              <directory>/opt/teragrep/${project.artifactId}/lib</directory>
+              <directoryIncluded>true</directoryIncluded>
+              <filemode>755</filemode>
+              <dirmode>755</dirmode>
+              <username>srv-cfe_35</username>
+              <groupname>srv-cfe_35</groupname>
+              <recurseDirectories>true</recurseDirectories>
+              <sources>
+                <source>
+                  <location>${project.basedir}/../target/cfe_35.jar</location>
+                  <destination>cfe_35.jar</destination>
+                </source>
+              </sources>
+            </mapping>
+          </mappings>
+          <requires>
+            <require>java-11-openjdk</require>
+            <require>tzdata-java</require>
+          </requires>
+          <preinstallScriptlet>
+            <script>
+getent group srv-cfe_35 > /dev/null || groupadd -r srv-cfe_35;
+getent passwd srv-cfe_35 > /dev/null || useradd -r -g srv-cfe_35 -d /opt/teragrep/${project.artifactId} -s /sbin/nologin -c "Service User" srv-cfe_35;
+if [ ! -d /opt/teragrep/${project.artifactId}/logs ]; then
+    mkdir -p /opt/teragrep/${project.artifactId}/logs;
+    chown srv-cfe_35:srv-cfe_35 /opt/teragrep/${project.artifactId}/logs;
+    chmod 700 /opt/teragrep/${project.artifactId}/logs;
+fi;
+exit 0;
+            </script>
+          </preinstallScriptlet>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

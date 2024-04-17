@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "nomatch": "unknown",
+  "type": "string",
+  "table": [
+    {
+      "index": "/example/logGroupName/ThatExists",
+      "value": "exampleAppName"
+    },
+    {
+      "index": "/example/logGroupName/returnsInvalidTagname",
+      "value": "##?"
+    }
+  ]
+}

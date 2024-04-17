@@ -1,0 +1,49 @@
+{
+  "spool": {
+    "enabled": true,
+    "target": "127.0.0.1",
+    "port": "4601",
+    "resumeinterval": "5",
+    "resumeretrycount": "-1",
+    "rebindinterval": "100",
+    "resumeintervalmax": "60",
+    "useresumeintervalmax": false
+  },
+  "inspection": {
+    "enabled": true,
+    "target": "127.0.0.1",
+    "port": "4602",
+    "resumeinterval": "5",
+    "resumeretrycount": "-1",
+    "rebindinterval": "100",
+    "resumeintervalmax": "60",
+    "useresumeintervalmax": false
+  },
+  "siem0": {
+    "enabled": true,
+    "target": "127.0.0.1",
+    "port": "4603",
+    "rebindinterval": "100",
+    "resumeinterval": "60",
+    "resumeintervalmax": "60",
+    "useresumeintervalmax": false
+  },
+  "hdfs": {
+    "enabled": true,
+    "target": "127.0.0.1",
+    "port": "4604",
+    "rebindinterval": "126",
+    "resumeinterval": "60",
+    "resumeintervalmax": "60",
+    "useresumeintervalmax": false
+  },
+  "dead-letter": {
+    "enabled": true,
+    "target": "127.0.0.1",
+    "port": "4605",
+    "rebindinterval": "126",
+    "resumeinterval": "60",
+    "resumeintervalmax": "60",
+    "useresumeintervalmax": false
+  }
+}

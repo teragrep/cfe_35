@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "nomatch": "unknown",
+  "type": "string",
+  "table": [
+    {
+      "index": "1234567890",
+      "value": "1234567890.host.example.com"
+    },
+    {
+      "index": "1234567890ReturnsInvalidHostname",
+      "value": "###?"
+    },
+    {
+      "index": "1234notrouted",
+      "value": "i-am-not-routed"
+    }
+  ]
+}

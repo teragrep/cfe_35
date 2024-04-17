@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "nomatch": "unknown",
+  "type": "string",
+  "table": [
+    {
+      "index": "",
+      "value": "true"
+    },
+    {
+      "index": "myAppName",
+      "value": "true"
+    },
+    {
+      "index": "group-one-tag-two",
+      "value": "true"
+    },
+    {
+      "index": "common-tag",
+      "value": "true"
+    },
+    {
+      "index": "performance-test-tag",
+      "value": "true"
+    }
+  ]
+}
