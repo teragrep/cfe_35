@@ -49,11 +49,11 @@ import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Slf4jReporter;
 import com.codahale.metrics.jmx.JmxReporter;
 import com.teragrep.cfe_35.config.RoutingConfig;
-import com.teragrep.rlp_03.delegate.FrameDelegate;
-import com.teragrep.rlp_03.Server;
-import com.teragrep.rlp_03.ServerFactory;
-import com.teragrep.rlp_03.delegate.DefaultFrameDelegate;
-import com.teragrep.rlp_03.config.Config;
+import com.teragrep.rlp_03.channel.socket.PlainFactory;
+import com.teragrep.rlp_03.frame.delegate.DefaultFrameDelegate;
+import com.teragrep.rlp_03.frame.delegate.FrameDelegate;
+import com.teragrep.rlp_03.server.Server;
+import com.teragrep.rlp_03.server.ServerFactory;
 import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.dropwizard.DropwizardExports;
 import io.prometheus.client.exporter.MetricsServlet;
@@ -64,6 +64,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -104,10 +106,10 @@ public class Router implements AutoCloseable {
             return new DefaultFrameDelegate(messageParser);
         };
 
-        Config config = new Config(routingConfig.getListenPort(), routingConfig.getServerThreads());
-
-        ServerFactory serverFactory = new ServerFactory(config, routingInstanceSupplier);
-        this.server = serverFactory.create();
+        ExecutorService executorService = Executors.newFixedThreadPool(routingConfig.getServerThreads());
+        PlainFactory plainFactory = new PlainFactory();
+        ServerFactory serverFactory = new ServerFactory(executorService, plainFactory, routingInstanceSupplier);
+        this.server = serverFactory.create(routingConfig.getListenPort());
         Thread serverThread = new Thread(server);
         serverThread.start();
 
