@@ -68,19 +68,21 @@ public class ParallelTargetRouting implements TargetRouting {
         this.totalBytes = metricRegistry.counter(name(ParallelTargetRouting.class, "totalBytes"));
 
         Map<String, TargetConfig> configMap = routingConfig.getTargetConfigMap();
-        for (String target : configMap.keySet()) {
-            if (configMap.get(target).isEnabled()) {
+        for (Map.Entry<String, TargetConfig> entry : configMap.entrySet()) {
+            String targetName = entry.getKey();
+            TargetConfig targetConfig = entry.getValue();
+            if (targetConfig.isEnabled()) {
                 Output output = new Output(
-                        target,
-                        configMap.get(target).getTarget(),
-                        Integer.parseInt(configMap.get(target).getPort()),
+                        targetName,
+                        targetConfig.getTarget(),
+                        Integer.parseInt(targetConfig.getPort()),
                         routingConfig.getConnectionTimeout(),
                         routingConfig.getReadTimeout(),
                         routingConfig.getWriteTimeout(),
                         routingConfig.getReconnectInterval(),
                         metricRegistry
                 );
-                this.outputMap.put(target, output);
+                this.outputMap.put(targetName, output);
             }
         }
     }
