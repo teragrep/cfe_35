@@ -50,8 +50,9 @@ import com.teragrep.cfe_35.config.RoutingConfig;
 import com.teragrep.cfe_35.router.targets.DeadLetter;
 import com.teragrep.cfe_35.router.targets.Inspection;
 import com.teragrep.rlo_06.*;
-import com.teragrep.rlp_03.FrameContext;
-import com.teragrep.rlp_03.TransportInfo;
+
+import com.teragrep.rlp_03.channel.socket.TransportInfo;
+import com.teragrep.rlp_03.frame.delegate.FrameContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -124,7 +125,7 @@ public class MessageParser implements Consumer<FrameContext>, AutoCloseable {
 
     @Override
     public void accept(FrameContext frameContext) {
-        transportInfo = frameContext.connectionContext().socket().getTransportInfo();
+        transportInfo = frameContext.establishedContext().socket().getTransportInfo();
         byte[] payload = frameContext.relpFrame().payload().toBytes();
         try (final Timer.Context context = responseLatency.time()) {
             // increment counters

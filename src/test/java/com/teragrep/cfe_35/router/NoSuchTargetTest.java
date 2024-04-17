@@ -47,12 +47,12 @@ package com.teragrep.cfe_35.router;
 
 import com.codahale.metrics.MetricRegistry;
 import com.teragrep.cfe_35.config.RoutingConfig;
-import com.teragrep.rlp_03.FrameContext;
-import com.teragrep.rlp_03.ServerFactory;
-import com.teragrep.rlp_03.config.Config;
-import com.teragrep.rlp_03.Server;
 
-import com.teragrep.rlp_03.delegate.DefaultFrameDelegate;
+import com.teragrep.rlp_03.channel.socket.PlainFactory;
+import com.teragrep.rlp_03.frame.delegate.DefaultFrameDelegate;
+import com.teragrep.rlp_03.frame.delegate.FrameContext;
+import com.teragrep.rlp_03.server.Server;
+import com.teragrep.rlp_03.server.ServerFactory;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -63,6 +63,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -87,9 +89,14 @@ public class NoSuchTargetTest {
     private void setup(int port, List<byte[]> recordList) throws IOException {
         Consumer<FrameContext> cbFunction = relpFrameServerRX -> recordList
                 .add(relpFrameServerRX.relpFrame().payload().toBytes());
-        Config config = new Config(port, 1);
-        ServerFactory serverFactory = new ServerFactory(config, () -> new DefaultFrameDelegate(cbFunction));
-        Server server = serverFactory.create();
+
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+        ServerFactory serverFactory = new ServerFactory(
+                executorService,
+                new PlainFactory(),
+                () -> new DefaultFrameDelegate(cbFunction)
+        );
+        Server server = serverFactory.create(port);
         Thread serverThread = new Thread(server);
         serverThread.start();
     }
