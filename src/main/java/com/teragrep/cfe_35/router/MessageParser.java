@@ -51,19 +51,24 @@ import com.teragrep.cfe_35.router.targets.DeadLetter;
 import com.teragrep.cfe_35.router.targets.Inspection;
 import com.teragrep.rlo_06.*;
 
-import com.teragrep.rlp_03.channel.socket.TransportInfo;
+import com.teragrep.net_01.channel.socket.TransportInfo;
+import com.teragrep.rlp_03.frame.RelpFrame;
+import com.teragrep.rlp_03.frame.RelpFrameFactory;
 import com.teragrep.rlp_03.frame.delegate.FrameContext;
+import com.teragrep.rlp_03.frame.delegate.event.RelpEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Collections;
-import java.util.function.Consumer;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 import static com.codahale.metrics.MetricRegistry.name;
 
-public class MessageParser implements Consumer<FrameContext>, AutoCloseable {
+public class MessageParser extends RelpEvent {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MessageParser.class);
     private final TargetRouting targetRouting;
@@ -73,6 +78,7 @@ public class MessageParser implements Consumer<FrameContext>, AutoCloseable {
     private final Counter bytes;
     private final Counter connections;
     private final RFC5424Frame rfc5424Frame;
+    private final RelpFrameFactory relpFrameFactory;
     private TransportInfo transportInfo;
 
     private final CFE07RecordFrame cfe07RecordFrame;
@@ -104,6 +110,7 @@ public class MessageParser implements Consumer<FrameContext>, AutoCloseable {
         this.connections.inc();
 
         this.rfc5424Frame = new RFC5424Frame();
+        this.relpFrameFactory = new RelpFrameFactory();
 
         this.cfe07RecordFrame = new CFE07RecordFrame(routingLookup, rfc5424Frame, deadLetter, inspection);
         this.kin02RecordFrame = new KIN02RecordFrame(
@@ -127,6 +134,8 @@ public class MessageParser implements Consumer<FrameContext>, AutoCloseable {
     public void accept(FrameContext frameContext) {
         transportInfo = frameContext.establishedContext().socket().getTransportInfo();
         byte[] payload = frameContext.relpFrame().payload().toBytes();
+
+        List<CompletableFuture<RelpFrame>> transmitted = new ArrayList<>();
         try (final Timer.Context context = responseLatency.time()) {
             // increment counters
             bytes.inc(payload.length);
@@ -149,7 +158,10 @@ public class MessageParser implements Consumer<FrameContext>, AutoCloseable {
                     }
                 }
 
-                targetRouting.route(routingData);
+                LOGGER.debug("about to route");
+                transmitted.addAll(targetRouting.route(routingData));
+                LOGGER.debug("routed");
+
             }
         }
         catch (Exception e) {
@@ -158,16 +170,37 @@ public class MessageParser implements Consumer<FrameContext>, AutoCloseable {
                             "route to <inspection> because exception while handling data from <{}>:<{}>",
                             transportInfo.getPeerAddress(), transportInfo.getPeerPort(), e
                     );
-            targetRouting.route(new RoutingData(payload, Collections.singleton(inspection.name)));
+            transmitted.addAll(targetRouting.route(new RoutingData(payload, Collections.singleton(inspection.name))));
         }
+
+        if (transmitted.isEmpty()) {
+            throw new IllegalStateException("no routing target futures were found");
+        }
+
+        CompletableFuture<RelpFrame>[] completableFuturesArrayTemplate = new CompletableFuture[0];
+
+        CompletableFuture<RelpFrame>[] completableFutures = transmitted.toArray(completableFuturesArrayTemplate);
+
+        // TODO create error handler, that re-creates the client when error occurs
+
+        CompletableFuture.allOf(completableFutures).thenRun(() -> {
+            LOGGER.debug("all transmitted.size() <{}> futures completed successfully", transmitted.size());
+            // respond that it was processed ok
+            RelpFrame responseFrame = relpFrameFactory
+                    .create(frameContext.relpFrame().txn().toBytes(), "rsp", "200 OK");
+            frameContext.establishedContext().egress().accept(responseFrame.toWriteable());
+            LOGGER.debug("responding with responseFrame <{}>", responseFrame);
+            frameContext.relpFrame().close();
+        });
     }
 
     @Override
     public void close() {
         if (transportInfo != null) {
-            LOGGER.info("closing connection for <{}:{}>", transportInfo.getPeerAddress(), transportInfo.getPeerPort());
+            LOGGER.debug("closing connection for <{}:{}>", transportInfo.getPeerAddress(), transportInfo.getPeerPort());
         }
         targetRouting.close();
         this.connections.dec();
     }
+
 }

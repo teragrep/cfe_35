@@ -49,11 +49,19 @@ import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.Slf4jReporter;
 import com.codahale.metrics.jmx.JmxReporter;
 import com.teragrep.cfe_35.config.RoutingConfig;
-import com.teragrep.rlp_03.channel.socket.PlainFactory;
+import com.teragrep.rlp_01.RelpCommand;
+import com.teragrep.net_01.eventloop.EventLoop;
+import com.teragrep.net_01.eventloop.EventLoopFactory;
+import com.teragrep.net_01.channel.context.ConnectContextFactory;
+import com.teragrep.net_01.channel.socket.PlainFactory;
+import com.teragrep.rlp_03.client.RelpClientFactory;
+import com.teragrep.rlp_03.frame.FrameDelegationClockFactory;
 import com.teragrep.rlp_03.frame.delegate.DefaultFrameDelegate;
 import com.teragrep.rlp_03.frame.delegate.FrameDelegate;
-import com.teragrep.rlp_03.server.Server;
-import com.teragrep.rlp_03.server.ServerFactory;
+import com.teragrep.rlp_03.frame.delegate.event.RelpEvent;
+import com.teragrep.rlp_03.frame.delegate.event.RelpEventClose;
+import com.teragrep.rlp_03.frame.delegate.event.RelpEventOpen;
+import com.teragrep.net_01.server.ServerFactory;
 import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.dropwizard.DropwizardExports;
 import io.prometheus.client.exporter.MetricsServlet;
@@ -64,6 +72,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -71,12 +81,14 @@ import java.util.function.Supplier;
 
 public class Router implements AutoCloseable {
 
-    private final Server server;
     private final RoutingLookup routingLookup;
     private final MetricRegistry metricRegistry = new MetricRegistry();
     private final JmxReporter jmxReporter;
     private final Slf4jReporter slf4jReporter;
     private final org.eclipse.jetty.server.Server jettyServer;
+    private final ExecutorService executorService;
+    private final EventLoop eventLoop;
+    private final Thread eventLoopThread;
 
     public Router(RoutingConfig routingConfig) throws IOException {
         this.jmxReporter = JmxReporter.forRegistry(metricRegistry).build();
@@ -89,29 +101,27 @@ public class Router implements AutoCloseable {
 
         this.routingLookup = new RoutingLookup(routingConfig);
 
-        Supplier<FrameDelegate> routingInstanceSupplier = () -> {
-            TargetRouting targetRouting;
-            try {
-                targetRouting = new ParallelTargetRouting(routingConfig, this.metricRegistry);
-            }
-            catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-            MessageParser messageParser = new MessageParser(
-                    this.routingLookup,
-                    targetRouting,
-                    this.metricRegistry,
-                    routingConfig
-            );
-            return new DefaultFrameDelegate(messageParser);
-        };
+        this.executorService = Executors.newFixedThreadPool(routingConfig.getServerThreads());
+        this.eventLoop = new EventLoopFactory().create();
 
-        ExecutorService executorService = Executors.newFixedThreadPool(routingConfig.getServerThreads());
+        this.eventLoopThread = new Thread(this.eventLoop);
+        this.eventLoopThread.start();
+
+        Supplier<FrameDelegate> routingInstanceSupplier = getFrameDelegateSupplier(routingConfig);
+
         PlainFactory plainFactory = new PlainFactory();
-        ServerFactory serverFactory = new ServerFactory(executorService, plainFactory, routingInstanceSupplier);
-        this.server = serverFactory.create(routingConfig.getListenPort());
-        Thread serverThread = new Thread(server);
-        serverThread.start();
+
+        FrameDelegationClockFactory frameDelegationClockFactory = new FrameDelegationClockFactory(
+                routingInstanceSupplier
+        );
+
+        ServerFactory serverFactory = new ServerFactory(
+                eventLoop,
+                executorService,
+                plainFactory,
+                frameDelegationClockFactory
+        );
+        serverFactory.create(routingConfig.getListenPort());
 
         this.jmxReporter.start();
         this.slf4jReporter.start(1, TimeUnit.MINUTES);
@@ -140,10 +150,46 @@ public class Router implements AutoCloseable {
 
     }
 
+    private Supplier<FrameDelegate> getFrameDelegateSupplier(RoutingConfig routingConfig) {
+        ConnectContextFactory connectContextFactory = new ConnectContextFactory(executorService, new PlainFactory());
+
+        RelpClientFactory clientFactory = new RelpClientFactory(connectContextFactory, eventLoop);
+
+        Supplier<FrameDelegate> routingInstanceSupplier = () -> {
+            TargetRouting targetRouting;
+            try {
+                targetRouting = new ParallelTargetRouting(routingConfig, this.metricRegistry, clientFactory);
+            }
+            catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+            MessageParser messageParser = new MessageParser(
+                    this.routingLookup,
+                    targetRouting,
+                    this.metricRegistry,
+                    routingConfig
+            );
+
+            Map<String, RelpEvent> relpCommandConsumerMap = new HashMap<>();
+            relpCommandConsumerMap.put(RelpCommand.CLOSE, new RelpEventClose());
+            relpCommandConsumerMap.put(RelpCommand.OPEN, new RelpEventOpen());
+
+            // messageParser creates replies, can not use RelpEventSyslog
+            relpCommandConsumerMap.put(RelpCommand.SYSLOG, messageParser);
+
+            return new DefaultFrameDelegate(relpCommandConsumerMap);
+        };
+        return routingInstanceSupplier;
+    }
+
     @Override
     public void close() throws Exception {
         // stop after done
-        server.stop();
+        // FIXME close outputs?
+        eventLoop.stop();
+        executorService.shutdown();
+        // TODO executorService.awaitTermination(1, TimeUnit.SECONDS); or something?
+        eventLoopThread.join();
         slf4jReporter.close();
         jmxReporter.close();
         jettyServer.stop();

@@ -48,43 +48,69 @@ package com.teragrep.cfe_35.router;
 import com.codahale.metrics.MetricRegistry;
 import com.teragrep.cfe_35.config.RoutingConfig;
 
-import com.teragrep.rlp_03.channel.socket.PlainFactory;
+import com.teragrep.rlp_01.RelpCommand;
+import com.teragrep.net_01.channel.context.ConnectContextFactory;
+import com.teragrep.net_01.channel.socket.PlainFactory;
+import com.teragrep.rlp_03.client.RelpClientFactory;
+import com.teragrep.net_01.eventloop.EventLoop;
+import com.teragrep.net_01.eventloop.EventLoopFactory;
+import com.teragrep.rlp_03.frame.FrameDelegationClockFactory;
 import com.teragrep.rlp_03.frame.delegate.DefaultFrameDelegate;
 import com.teragrep.rlp_03.frame.delegate.FrameContext;
-import com.teragrep.rlp_03.server.Server;
-import com.teragrep.rlp_03.server.ServerFactory;
+import com.teragrep.rlp_03.frame.delegate.event.RelpEvent;
+import com.teragrep.rlp_03.frame.delegate.event.RelpEventClose;
+import com.teragrep.rlp_03.frame.delegate.event.RelpEventOpen;
+import com.teragrep.net_01.server.ServerFactory;
 import com.teragrep.rlp_03.frame.delegate.FrameDelegate;
 import org.junit.jupiter.api.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@TestMethodOrder(MethodOrderer.MethodName.class)
 public class MessageParserTest {
 
-    private final List<byte[]> spoolList = new ArrayList<>();
-    private final List<byte[]> inspectionList = new ArrayList<>();
-    private final List<byte[]> siem0List = new ArrayList<>();
-    private final List<byte[]> hdfsList = new ArrayList<>();
-    private final List<byte[]> deadLetterList = new ArrayList<>();
+    private static final Logger LOGGER = LoggerFactory.getLogger(MessageParserTest.class);
+
+    public MessageParserTest() {
+        //Configurator.setLevel("com.teragrep.rlp_03", Level.TRACE);
+    }
+
+    private final ConcurrentLinkedQueue<byte[]> spoolList = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<byte[]> inspectionList = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<byte[]> siem0List = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<byte[]> hdfsList = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<byte[]> deadLetterList = new ConcurrentLinkedQueue<>();
 
     private final int port = 3600;
 
     @BeforeAll
     public void setupTargets() throws IOException {
-        setup(3601, spoolList);
-        setup(3602, inspectionList);
-        setup(3603, siem0List);
-        setup(3604, hdfsList);
-        setup(3605, deadLetterList);
 
-        setupTestServer();
+        EventLoopFactory eventLoopFactory = new EventLoopFactory();
+        EventLoop eventLoop = eventLoopFactory.create(); // FIXME this is not cleaned up
+        Thread eventLoopThread = new Thread(eventLoop);
+        eventLoopThread.start(); // FIXME this is not cleaned up
+
+        ExecutorService executorService = Executors.newSingleThreadExecutor(); // FIXME this is not cleaned up
+
+        setup(eventLoop, executorService, 3601, spoolList, "spool");
+        setup(eventLoop, executorService, 3602, inspectionList, "inspection");
+        setup(eventLoop, executorService, 3603, siem0List, "siem0");
+        setup(eventLoop, executorService, 3604, hdfsList, "hdfs");
+        setup(eventLoop, executorService, 3605, deadLetterList, "deadLetter");
+
+        setupTestServer(eventLoop, executorService);
     }
 
     @AfterEach
@@ -94,23 +120,45 @@ public class MessageParserTest {
         siem0List.clear();
         hdfsList.clear();
         deadLetterList.clear();
+        LOGGER.info("cleared");
     }
 
-    private void setup(int port, List<byte[]> recordList) throws IOException {
-        Consumer<FrameContext> cbFunction = relpFrameServerRX -> recordList
-                .add(relpFrameServerRX.relpFrame().payload().toBytes());
-        ExecutorService executorService = Executors.newSingleThreadExecutor();
+    private void setup(
+            EventLoop eventLoop,
+            ExecutorService executorService,
+            int port,
+            ConcurrentLinkedQueue<byte[]> recordList,
+            String name
+    ) throws IOException {
+        Consumer<FrameContext> cbFunction = relpFrameServerRX -> {
+
+            LOGGER.error("name <{}> got payload <[{}]>", name, relpFrameServerRX.relpFrame().payload().toString());
+
+            recordList.add(relpFrameServerRX.relpFrame().payload().toBytes());
+
+            //LOGGER.info("name recordList.size() <{}>", recordList.size());
+        };
+
+        /*
+        EventLoopFactory eventLoopFactory = new EventLoopFactory();
+        EventLoop eventLoop = eventLoopFactory.create(); // FIXME this is not cleaned up
+        Thread eventLoopThread = new Thread(eventLoop, "T-" + name + "-eventLoop");
+        eventLoopThread.start(); // FIXME this is not cleaned up
+        
+        ExecutorService executorService = Executors
+                .newSingleThreadExecutor(runnable -> new Thread(runnable, "T-" + name + "-runner"));
+        
+         */
         ServerFactory serverFactory = new ServerFactory(
+                eventLoop,
                 executorService,
                 new PlainFactory(),
-                () -> new DefaultFrameDelegate(cbFunction)
+                new FrameDelegationClockFactory(() -> new DefaultFrameDelegate(cbFunction))
         );
-        Server server = serverFactory.create(port);
-        Thread serverThread = new Thread(server);
-        serverThread.start();
+        serverFactory.create(port);
     }
 
-    private void setupTestServer() throws IOException {
+    private void setupTestServer(EventLoop eventLoop, ExecutorService executorService) throws IOException {
         MetricRegistry metricRegistry = new MetricRegistry();
         System.setProperty("routingTargetsConfig", "src/test/resources/targetsMessageParserTest.json");
         System.setProperty("cfe07LookupPath", "src/test/resources/cfe_07");
@@ -121,10 +169,24 @@ public class MessageParserTest {
         RoutingConfig routingConfig = new RoutingConfig();
         RoutingLookup routingLookup = new RoutingLookup(routingConfig);
 
+        /*
+        EventLoopFactory eventLoopFactory = new EventLoopFactory();
+        EventLoop eventLoop = eventLoopFactory.create(); // FIXME this is not cleaned up
+        Thread eventLoopThread = new Thread(eventLoop, "S-eventLoop");
+        eventLoopThread.start(); // FIXME this is not cleaned up
+        
+        ExecutorService executorService = Executors
+                .newCachedThreadPool(runnable -> new Thread(runnable, "T-" + "server" + "-runner")); // FIXME this is not cleaned up
+        
+        
+         */
+        ConnectContextFactory connectContextFactory = new ConnectContextFactory(executorService, new PlainFactory());
+        RelpClientFactory clientFactory = new RelpClientFactory(connectContextFactory, eventLoop);
+
         Supplier<FrameDelegate> routingInstanceSupplier = () -> {
             TargetRouting targetRouting;
             try {
-                targetRouting = new ParallelTargetRouting(routingConfig, metricRegistry);
+                targetRouting = new ParallelTargetRouting(routingConfig, metricRegistry, clientFactory);
             }
             catch (IOException e) {
                 throw new RuntimeException(e);
@@ -135,17 +197,28 @@ public class MessageParserTest {
                     metricRegistry,
                     routingConfig
             );
-            return new DefaultFrameDelegate(messageParser);
+
+            Map<String, RelpEvent> relpCommandConsumerMap = new HashMap<>();
+            relpCommandConsumerMap.put(RelpCommand.CLOSE, new RelpEventClose());
+            relpCommandConsumerMap.put(RelpCommand.OPEN, new RelpEventOpen());
+
+            // messageParser creates replies, can not use RelpEventSyslog
+            relpCommandConsumerMap.put(RelpCommand.SYSLOG, messageParser);
+
+            return new DefaultFrameDelegate(relpCommandConsumerMap);
+
         };
-        ExecutorService executorService = Executors.newSingleThreadExecutor();
-        ServerFactory serverFactory = new ServerFactory(executorService, new PlainFactory(), routingInstanceSupplier);
-        Server server = serverFactory.create(port);
-        Thread serverThread = new Thread(server);
-        serverThread.start();
+        ServerFactory serverFactory = new ServerFactory(
+                eventLoop,
+                executorService,
+                new PlainFactory(),
+                new FrameDelegationClockFactory(routingInstanceSupplier)
+        );
+        serverFactory.create(port);
     }
 
     private void sendRecord(byte[] record) {
-        try (Output output = new Output("test1", "localhost", port, 1000, 1000, 1000, 1000, new MetricRegistry())) {
+        try (Output output = new Output("test1", "localhost", port, 10000, 10000, 10000, 10000, new MetricRegistry())) {
             output.accept(record);
         }
     }
@@ -154,8 +227,9 @@ public class MessageParserTest {
     public void sendInspectionTest() {
         sendRecord("test".getBytes(StandardCharsets.UTF_8));
 
+        LOGGER.warn("inspectionList.size <{}>", inspectionList.size());
         // test that it goes to inspection
-        Assertions.assertEquals("test", new String(inspectionList.get(0), StandardCharsets.UTF_8));
+        Assertions.assertEquals("test", new String(inspectionList.poll(), StandardCharsets.UTF_8));
     }
 
     @Test
@@ -163,7 +237,7 @@ public class MessageParserTest {
         sendRecord(("<999>1    - - -").getBytes(StandardCharsets.UTF_8));
 
         // test that it goes to inspection
-        Assertions.assertEquals("<999>1    - - -", new String(inspectionList.get(0), StandardCharsets.UTF_8));
+        Assertions.assertEquals("<999>1    - - -", new String(inspectionList.poll(), StandardCharsets.UTF_8));
     }
 
     @Test
@@ -172,7 +246,7 @@ public class MessageParserTest {
         final String modifiedRecord = "<14>1 2023-08-04T20:16:59.292Z 1234567890.host.example.com exampleAppName - - [stream-processor@48577 log-group=\"/example/logGroupName/ThatExists\" log-stream=\"task/bbb-front-service/a4b046968c23af470b6cf9db016d4583\" account=\"1234567890\"] Example";
         sendRecord(record.getBytes(StandardCharsets.UTF_8));
 
-        Assertions.assertEquals(modifiedRecord, new String(spoolList.get(0), StandardCharsets.UTF_8));
+        Assertions.assertEquals(modifiedRecord, new String(spoolList.poll(), StandardCharsets.UTF_8));
     }
 
     @Test
@@ -181,7 +255,7 @@ public class MessageParserTest {
         final String modifiedRecord = "<14>1 2023-08-07T08:39:43.196Z my-routingkey-having-hostname.example.com capsulated - - [CFE-16-metadata@48577 authentication_token=\"My RoutingKey having token\" channel=\"defaultchannel\" time_source=\"generated\"][CFE-16-origin@48577 X-Forwarded-For=\"127.0.0.3\" X-Forwarded-Host=\"127.0.0.2\" X-Forwarded-Proto=\"http\"][event_id@48577 hostname=\"relay.example.com\" uuid=\"029EF30A9CB94D32BE40D3DCD01765AA\" unixtime=\"1691408383\" id_source=\"relay\"][event_format@48577 original_format=\"rfc5424\"][event_node_relay@48577 hostname=\"relay.example.com\" source=\"localhost\" source_module=\"imptcp\"][event_version@48577 major=\"2\" minor=\"2\" hostname=\"relay.example.com\" version_source=\"relay\"] \"Testing\"";
         sendRecord(record.getBytes(StandardCharsets.UTF_8));
 
-        Assertions.assertEquals(modifiedRecord, new String(spoolList.get(0), StandardCharsets.UTF_8));
+        Assertions.assertEquals(modifiedRecord, new String(spoolList.poll(), StandardCharsets.UTF_8));
     }
 
     @Test
@@ -190,7 +264,7 @@ public class MessageParserTest {
         final String modifiedRecord = "<14>1 2023-08-04T20:16:59.292Z 1234567890.host.example.com exampleAppName - - [stream-processor@48577 log-group=\"/example/logGroupName/ThatExists\" log-stream=\"task/bbb-front-service/a4b046968c23af470b6cf9db016d4583\" account=\"1234567890\"] Example";
         sendRecord(record.getBytes(StandardCharsets.UTF_8));
 
-        Assertions.assertEquals(modifiedRecord, new String(spoolList.get(0), StandardCharsets.UTF_8));
+        Assertions.assertEquals(modifiedRecord, new String(spoolList.poll(), StandardCharsets.UTF_8));
     }
 
     @Test
@@ -199,6 +273,6 @@ public class MessageParserTest {
         final String modifiedRecord = "<14>1 2023-08-07T08:39:43.196Z my-routingkey-having-hostname.example.com capsulated - - [CFE-16-metadata@48577 authentication_token=\"My RoutingKey having token\" channel=\"defaultchannel\" time_source=\"generated\"][CFE-16-origin@48577 X-Forwarded-For=\"127.0.0.3\" X-Forwarded-Host=\"127.0.0.2\" X-Forwarded-Proto=\"http\"][event_id@48577 hostname=\"relay.example.com\" uuid=\"029EF30A9CB94D32BE40D3DCD01765AA\" unixtime=\"1691408383\" id_source=\"relay\"][event_format@48577 original_format=\"rfc5424\"][event_node_relay@48577 hostname=\"relay.example.com\" source=\"localhost\" source_module=\"imptcp\"][event_version@48577 major=\"2\" minor=\"2\" hostname=\"relay.example.com\" version_source=\"relay\"] \"Testing\"";
         sendRecord(record.getBytes(StandardCharsets.UTF_8));
 
-        Assertions.assertEquals(modifiedRecord, new String(spoolList.get(0), StandardCharsets.UTF_8));
+        Assertions.assertEquals(modifiedRecord, new String(spoolList.poll(), StandardCharsets.UTF_8));
     }
 }

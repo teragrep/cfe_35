@@ -48,11 +48,16 @@ package com.teragrep.cfe_35.router;
 import com.codahale.metrics.MetricRegistry;
 import com.teragrep.cfe_35.config.RoutingConfig;
 
-import com.teragrep.rlp_03.channel.socket.PlainFactory;
+import com.teragrep.net_01.channel.context.ConnectContextFactory;
+import com.teragrep.net_01.channel.socket.PlainFactory;
+import com.teragrep.rlp_03.client.RelpClientFactory;
+import com.teragrep.net_01.eventloop.EventLoop;
+import com.teragrep.net_01.eventloop.EventLoopFactory;
+import com.teragrep.rlp_03.frame.FrameDelegationClockFactory;
+import com.teragrep.rlp_03.frame.RelpFrame;
 import com.teragrep.rlp_03.frame.delegate.DefaultFrameDelegate;
 import com.teragrep.rlp_03.frame.delegate.FrameContext;
-import com.teragrep.rlp_03.server.Server;
-import com.teragrep.rlp_03.server.ServerFactory;
+import com.teragrep.net_01.server.ServerFactory;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -63,6 +68,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -78,8 +85,19 @@ public class TargetRoutingTest {
 
     private final MetricRegistry metricRegistry = new MetricRegistry();
 
+    private EventLoop eventLoop;
+    private ExecutorService executorService;
+
     @BeforeAll
     public void setupTargets() throws IOException {
+
+        EventLoopFactory eventLoopFactory = new EventLoopFactory();
+        eventLoop = eventLoopFactory.create(); // FIXME this is not cleaned up
+        Thread eventLoopThread = new Thread(eventLoop);
+        eventLoopThread.start(); // FIXME this is not cleaned up
+
+        executorService = Executors.newSingleThreadExecutor(); // FIXME this is not cleaned up
+
         setup(2601, spoolList);
         setup(2602, inspectionList);
         setup(2603, siem0List);
@@ -91,24 +109,43 @@ public class TargetRoutingTest {
         Consumer<FrameContext> cbFunction = relpFrameServerRX -> recordList
                 .add(relpFrameServerRX.relpFrame().payload().toBytes());
 
-        ExecutorService executorService = Executors.newSingleThreadExecutor();
         ServerFactory serverFactory = new ServerFactory(
+                eventLoop,
                 executorService,
                 new PlainFactory(),
-                () -> new DefaultFrameDelegate(cbFunction)
+                new FrameDelegationClockFactory(() -> new DefaultFrameDelegate(cbFunction))
         );
-        Server server = serverFactory.create(port);
-        Thread serverThread = new Thread(server);
-        serverThread.start();
+        serverFactory.create(port);
     }
 
     @Test
     public void testSpool() throws IOException {
         System.setProperty("routingTargetsConfig", "src/test/resources/targets.json");
+
+        ExecutorService executorService = Executors.newFixedThreadPool(4); // FIXME this is not cleaned up
+
+        ConnectContextFactory connectContextFactory = new ConnectContextFactory(executorService, new PlainFactory());
+        RelpClientFactory clientFactory = new RelpClientFactory(connectContextFactory, eventLoop);
+
         RoutingConfig routingConfig = new RoutingConfig();
-        try (TargetRouting targetRouting = new ParallelTargetRouting(routingConfig, this.metricRegistry)) {
-            targetRouting
+        try (
+                TargetRouting targetRouting = new ParallelTargetRouting(
+                        routingConfig,
+                        this.metricRegistry,
+                        clientFactory
+                )
+        ) {
+            List<CompletableFuture<RelpFrame>> futures = targetRouting
                     .route(new RoutingData("test1".getBytes(StandardCharsets.UTF_8), Collections.singleton("spool")));
+
+            CompletableFuture<RelpFrame>[] completableFuturesArrayTemplate = new CompletableFuture[0];
+
+            CompletableFuture<RelpFrame>[] completableFutures = futures.toArray(completableFuturesArrayTemplate);
+
+            CompletableFuture.allOf(completableFutures).get();
+        }
+        catch (ExecutionException | InterruptedException e) {
+            throw new RuntimeException(e);
         }
 
         Assertions.assertEquals("test1", new String(spoolList.get(0), StandardCharsets.UTF_8));
@@ -119,8 +156,18 @@ public class TargetRoutingTest {
     @Test
     public void testFailed() throws IOException {
         System.setProperty("routingTargetsConfig", "src/test/resources/targets.json");
+
+        ConnectContextFactory connectContextFactory = new ConnectContextFactory(executorService, new PlainFactory());
+        RelpClientFactory clientFactory = new RelpClientFactory(connectContextFactory, eventLoop);
+
         RoutingConfig routingConfig = new RoutingConfig();
-        try (TargetRouting targetRouting = new ParallelTargetRouting(routingConfig, this.metricRegistry)) {
+        try (
+                TargetRouting targetRouting = new ParallelTargetRouting(
+                        routingConfig,
+                        this.metricRegistry,
+                        clientFactory
+                )
+        ) {
             Assertions.assertThrows(IllegalArgumentException.class, () -> {
                 targetRouting
                         .route(new RoutingData("test2".getBytes(StandardCharsets.UTF_8), Collections.singleton("no-such-thing")));
@@ -132,11 +179,30 @@ public class TargetRoutingTest {
     @Test
     public void testInspection() throws IOException {
         System.setProperty("routingTargetsConfig", "src/test/resources/targets.json");
+
+        ConnectContextFactory connectContextFactory = new ConnectContextFactory(executorService, new PlainFactory());
+        RelpClientFactory clientFactory = new RelpClientFactory(connectContextFactory, eventLoop);
+
         RoutingConfig routingConfig = new RoutingConfig();
 
-        try (TargetRouting targetRouting = new ParallelTargetRouting(routingConfig, this.metricRegistry)) {
-            targetRouting
+        try (
+                TargetRouting targetRouting = new ParallelTargetRouting(
+                        routingConfig,
+                        this.metricRegistry,
+                        clientFactory
+                )
+        ) {
+            List<CompletableFuture<RelpFrame>> futures = targetRouting
                     .route(new RoutingData("test3".getBytes(StandardCharsets.UTF_8), Collections.singleton("inspection")));
+
+            CompletableFuture<RelpFrame>[] completableFuturesArrayTemplate = new CompletableFuture[0];
+
+            CompletableFuture<RelpFrame>[] completableFutures = futures.toArray(completableFuturesArrayTemplate);
+
+            CompletableFuture.allOf(completableFutures).get();
+        }
+        catch (ExecutionException | InterruptedException e) {
+            throw new RuntimeException(e);
         }
 
         Assertions.assertEquals("test3", new String(inspectionList.get(0), StandardCharsets.UTF_8));
@@ -146,11 +212,30 @@ public class TargetRoutingTest {
     @Test
     public void testSiem0() throws IOException {
         System.setProperty("routingTargetsConfig", "src/test/resources/targets.json");
+
+        ConnectContextFactory connectContextFactory = new ConnectContextFactory(executorService, new PlainFactory());
+        RelpClientFactory clientFactory = new RelpClientFactory(connectContextFactory, eventLoop);
+
         RoutingConfig routingConfig = new RoutingConfig();
 
-        try (TargetRouting targetRouting = new ParallelTargetRouting(routingConfig, this.metricRegistry)) {
-            targetRouting
+        try (
+                TargetRouting targetRouting = new ParallelTargetRouting(
+                        routingConfig,
+                        this.metricRegistry,
+                        clientFactory
+                )
+        ) {
+            List<CompletableFuture<RelpFrame>> futures = targetRouting
                     .route(new RoutingData("test4".getBytes(StandardCharsets.UTF_8), Collections.singleton("siem0")));
+
+            CompletableFuture<RelpFrame>[] completableFuturesArrayTemplate = new CompletableFuture[0];
+
+            CompletableFuture<RelpFrame>[] completableFutures = futures.toArray(completableFuturesArrayTemplate);
+
+            CompletableFuture.allOf(completableFutures).get();
+        }
+        catch (ExecutionException | InterruptedException e) {
+            throw new RuntimeException(e);
         }
 
         Assertions.assertEquals("test4", new String(siem0List.get(0), StandardCharsets.UTF_8));
@@ -160,10 +245,29 @@ public class TargetRoutingTest {
     @Test
     public void testHDFS() throws IOException {
         System.setProperty("routingTargetsConfig", "src/test/resources/targets.json");
+
+        ConnectContextFactory connectContextFactory = new ConnectContextFactory(executorService, new PlainFactory());
+        RelpClientFactory clientFactory = new RelpClientFactory(connectContextFactory, eventLoop);
+
         RoutingConfig routingConfig = new RoutingConfig();
-        try (TargetRouting targetRouting = new ParallelTargetRouting(routingConfig, this.metricRegistry)) {
-            targetRouting
+        try (
+                TargetRouting targetRouting = new ParallelTargetRouting(
+                        routingConfig,
+                        this.metricRegistry,
+                        clientFactory
+                )
+        ) {
+            List<CompletableFuture<RelpFrame>> futures = targetRouting
                     .route(new RoutingData("test5".getBytes(StandardCharsets.UTF_8), Collections.singleton("hdfs")));
+
+            CompletableFuture<RelpFrame>[] completableFuturesArrayTemplate = new CompletableFuture[0];
+
+            CompletableFuture<RelpFrame>[] completableFutures = futures.toArray(completableFuturesArrayTemplate);
+
+            CompletableFuture.allOf(completableFutures).get();
+        }
+        catch (ExecutionException | InterruptedException e) {
+            throw new RuntimeException(e);
         }
 
         Assertions.assertEquals("test5", new String(hdfsList.get(0), StandardCharsets.UTF_8));
@@ -173,10 +277,29 @@ public class TargetRoutingTest {
     @Test
     public void testDeadLetter() throws IOException {
         System.setProperty("routingTargetsConfig", "src/test/resources/targets.json");
+
+        ConnectContextFactory connectContextFactory = new ConnectContextFactory(executorService, new PlainFactory());
+        RelpClientFactory clientFactory = new RelpClientFactory(connectContextFactory, eventLoop);
+
         RoutingConfig routingConfig = new RoutingConfig();
-        try (TargetRouting targetRouting = new ParallelTargetRouting(routingConfig, this.metricRegistry)) {
-            targetRouting
+        try (
+                TargetRouting targetRouting = new ParallelTargetRouting(
+                        routingConfig,
+                        this.metricRegistry,
+                        clientFactory
+                )
+        ) {
+            List<CompletableFuture<RelpFrame>> futures = targetRouting
                     .route(new RoutingData("test6".getBytes(StandardCharsets.UTF_8), Collections.singleton("dead-letter")));
+
+            CompletableFuture<RelpFrame>[] completableFuturesArrayTemplate = new CompletableFuture[0];
+
+            CompletableFuture<RelpFrame>[] completableFutures = futures.toArray(completableFuturesArrayTemplate);
+
+            CompletableFuture.allOf(completableFutures).get();
+        }
+        catch (ExecutionException | InterruptedException e) {
+            throw new RuntimeException(e);
         }
 
         Assertions.assertEquals("test6", new String(deadLetterList.get(0), StandardCharsets.UTF_8));

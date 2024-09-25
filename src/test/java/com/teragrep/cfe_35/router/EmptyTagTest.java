@@ -48,12 +48,16 @@ package com.teragrep.cfe_35.router;
 import com.codahale.metrics.MetricRegistry;
 import com.teragrep.cfe_35.config.RoutingConfig;
 
-import com.teragrep.rlp_03.channel.socket.PlainFactory;
+import com.teragrep.net_01.channel.context.ConnectContextFactory;
+import com.teragrep.net_01.channel.socket.PlainFactory;
+import com.teragrep.rlp_03.client.RelpClientFactory;
+import com.teragrep.net_01.eventloop.EventLoop;
+import com.teragrep.net_01.eventloop.EventLoopFactory;
+import com.teragrep.rlp_03.frame.FrameDelegationClockFactory;
 import com.teragrep.rlp_03.frame.delegate.DefaultFrameDelegate;
 import com.teragrep.rlp_03.frame.delegate.FrameContext;
 import com.teragrep.rlp_03.frame.delegate.FrameDelegate;
-import com.teragrep.rlp_03.server.Server;
-import com.teragrep.rlp_03.server.ServerFactory;
+import com.teragrep.net_01.server.ServerFactory;
 
 import org.junit.jupiter.api.*;
 
@@ -101,14 +105,19 @@ public class EmptyTagTest {
         Consumer<FrameContext> cbFunction = relpFrameServerRX -> recordList
                 .add(relpFrameServerRX.relpFrame().payload().toBytes());
         ExecutorService executorService = Executors.newSingleThreadExecutor();
+        EventLoopFactory eventLoopFactory = new EventLoopFactory();
+        EventLoop eventLoop = eventLoopFactory.create(); // FIXME this is not cleaned up
+        Thread eventLoopThread = new Thread(eventLoop);
+        eventLoopThread.start(); // FIXME this is not cleaned up
+
         ServerFactory serverFactory = new ServerFactory(
+                eventLoop,
                 executorService,
                 new PlainFactory(),
-                () -> new DefaultFrameDelegate(cbFunction)
+                new FrameDelegationClockFactory(() -> new DefaultFrameDelegate(cbFunction))
         );
-        Server server = serverFactory.create(port);
-        Thread serverThread = new Thread(server);
-        serverThread.start();
+        serverFactory.create(port);
+        ;
     }
 
     private void setupTestServer() throws IOException {
@@ -122,10 +131,20 @@ public class EmptyTagTest {
         RoutingConfig routingConfig = new RoutingConfig();
         RoutingLookup routingLookup = new RoutingLookup(routingConfig);
 
+        EventLoopFactory eventLoopFactory = new EventLoopFactory();
+        EventLoop eventLoop = eventLoopFactory.create(); // FIXME this is not cleaned up
+        Thread eventLoopThread = new Thread(eventLoop);
+        eventLoopThread.start(); // FIXME this is not cleaned up
+
+        ExecutorService executorService = Executors.newFixedThreadPool(4); // FIXME this is not cleaned up
+
+        ConnectContextFactory connectContextFactory = new ConnectContextFactory(executorService, new PlainFactory());
+        RelpClientFactory clientFactory = new RelpClientFactory(connectContextFactory, eventLoop);
+
         Supplier<FrameDelegate> routingInstanceSupplier = () -> {
             TargetRouting targetRouting;
             try {
-                targetRouting = new ParallelTargetRouting(routingConfig, metricRegistry);
+                targetRouting = new ParallelTargetRouting(routingConfig, metricRegistry, clientFactory);
             }
             catch (IOException e) {
                 throw new RuntimeException(e);
@@ -139,11 +158,13 @@ public class EmptyTagTest {
             return new DefaultFrameDelegate(messageParser);
         };
 
-        ExecutorService executorService = Executors.newSingleThreadExecutor();
-        ServerFactory serverFactory = new ServerFactory(executorService, new PlainFactory(), routingInstanceSupplier);
-        Server server = serverFactory.create(port);
-        Thread serverThread = new Thread(server);
-        serverThread.start();
+        ServerFactory serverFactory = new ServerFactory(
+                eventLoop,
+                executorService,
+                new PlainFactory(),
+                new FrameDelegationClockFactory(routingInstanceSupplier)
+        );
+        serverFactory.create(port);
     }
 
     private void sendRecord(byte[] record) {
